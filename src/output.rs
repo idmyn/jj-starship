@@ -108,6 +108,12 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
             format!("\"{}\"", config.truncate_desc(&info.description))
         };
         out.push_str(&format_segment(&desc_text, GREEN, display.show_color));
+
+        // Empty commit indicator
+        if info.empty_commit {
+            out.push(' ');
+            out.push_str(&format_segment("(empty)", GREEN, display.show_color));
+        }
     }
 
     // Status indicators (priority: ! > ⇔ > ∅ > ⇡)
@@ -578,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_jj_format_empty_commit_empty_desc() {
-        // Empty commit with empty description: no status should be displayed
+        // Empty commit with empty description: shows fallback + (empty)
         let info = JjInfo {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
@@ -595,7 +601,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}anonymous{RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}anonymous{RESET} {GREEN}(empty){RESET}"
             )
         );
     }
