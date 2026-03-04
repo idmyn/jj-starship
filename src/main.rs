@@ -52,6 +52,18 @@ struct Cli {
     #[arg(long, global = true)]
     strip_bookmark_prefix: Option<String>,
 
+    /// Max description length (default: 30, 0 = unlimited)
+    #[arg(long, global = true)]
+    jj_desc_length: Option<usize>,
+
+    /// Fallback text when description is empty (default: "anonymous")
+    #[arg(long, global = true)]
+    jj_desc_fallback: Option<String>,
+
+    /// Use shortest unique prefix for `change_id`
+    #[arg(long, global = true)]
+    shortest_id: bool,
+
     /// Symbol prefix for JJ repos (default: "󱗆")
     #[arg(long, global = true)]
     jj_symbol: Option<String>,
@@ -80,6 +92,12 @@ struct Cli {
     /// Disable unique prefix coloring for `change_id`
     #[arg(long, global = true)]
     no_prefix_color: bool,
+    /// Hide WC description
+    #[arg(long, global = true)]
+    no_jj_desc: bool,
+    /// Hide parent description
+    #[arg(long, global = true)]
+    no_jj_parent_desc: bool,
 
     #[cfg(feature = "git")]
     #[command(flatten)]
@@ -131,6 +149,8 @@ fn main() -> ExitCode {
         no_status: cli.no_jj_status,
         no_color: cli.no_color,
         no_prefix_color: cli.no_prefix_color,
+        no_description: cli.no_jj_desc,
+        no_parent_description: cli.no_jj_parent_desc,
     };
 
     #[cfg(feature = "git")]
@@ -142,7 +162,9 @@ fn main() -> ExitCode {
             no_id: cli.git.no_git_id,
             no_status: cli.git.no_git_status,
             no_color: cli.no_color,
-            no_prefix_color: false, // N/A for git
+            no_prefix_color: false,       // N/A for git
+            no_description: false,        // N/A for git
+            no_parent_description: false, // N/A for git
         },
     );
     #[cfg(not(feature = "git"))]
@@ -154,6 +176,9 @@ fn main() -> ExitCode {
         cli.ancestor_bookmark_depth,
         cli.bookmarks_display_limit,
         cli.strip_bookmark_prefix,
+        cli.jj_desc_length,
+        cli.jj_desc_fallback,
+        cli.shortest_id,
         jj_symbol,
         git_symbol,
         cli.no_symbol,
@@ -318,6 +343,9 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            false,
             cli.jj_symbol,
             None,
             cli.no_symbol,

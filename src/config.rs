@@ -22,6 +22,10 @@ pub struct DisplayConfig {
     pub show_color: bool,
     /// Show unique prefix coloring for `change_id` (JJ only)
     pub show_prefix_color: bool,
+    /// Show WC description
+    pub show_description: bool,
+    /// Show parent description
+    pub show_parent_description: bool,
 }
 
 impl DisplayConfig {
@@ -33,6 +37,8 @@ impl DisplayConfig {
             show_status: true,
             show_color: true,
             show_prefix_color: true,
+            show_description: true,
+            show_parent_description: true,
         }
     }
 }
@@ -50,6 +56,12 @@ pub struct Config {
     pub bookmarks_display_limit: usize,
     /// Prefixes to strip from bookmark names (comma-separated)
     pub strip_bookmark_prefix: Vec<String>,
+    /// Max description length (0 = unlimited)
+    pub desc_length: usize,
+    /// Fallback text when description is empty
+    pub desc_fallback: Cow<'static, str>,
+    /// Use shortest unique prefix for `change_id` instead of fixed `id_length`
+    pub shortest_id: bool,
     /// Symbol prefix for JJ repos
     pub jj_symbol: Cow<'static, str>,
     /// Symbol prefix for Git repos
@@ -70,6 +82,9 @@ impl Default for Config {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 3,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(DEFAULT_JJ_SYMBOL),
             git_symbol: Cow::Borrowed(DEFAULT_GIT_SYMBOL),
             jj_display: DisplayConfig::all_visible(),
@@ -91,6 +106,8 @@ pub struct DisplayFlags {
     pub no_status: bool,
     pub no_color: bool,
     pub no_prefix_color: bool,
+    pub no_description: bool,
+    pub no_parent_description: bool,
 }
 
 impl DisplayFlags {
@@ -103,6 +120,10 @@ impl DisplayFlags {
             show_color: !self.no_color && env::var(format!("{env_prefix}_COLOR")).is_err(),
             show_prefix_color: !self.no_prefix_color
                 && env::var("JJ_STARSHIP_NO_PREFIX_COLOR").is_err(),
+            show_description: !self.no_description
+                && env::var(format!("{env_prefix}_DESC")).is_err(),
+            show_parent_description: !self.no_parent_description
+                && env::var(format!("{env_prefix}_PARENT_DESC")).is_err(),
         }
     }
 }
@@ -117,6 +138,9 @@ impl Config {
         ancestor_bookmark_depth: Option<usize>,
         bookmarks_display_limit: Option<usize>,
         strip_bookmark_prefix: Option<String>,
+        desc_length: Option<usize>,
+        desc_fallback: Option<String>,
+        shortest_id: bool,
         jj_symbol: Option<String>,
         git_symbol: Option<String>,
         no_symbol: bool,
@@ -154,6 +178,16 @@ impl Config {
             .map(|s| s.split(',').map(ToString::to_string).collect())
             .unwrap_or_default();
 
+        let desc_length = desc_length
+            .or_else(|| env::var("JJ_STARSHIP_JJ_DESC_LENGTH").ok()?.parse().ok())
+            .unwrap_or(30);
+
+        let desc_fallback = desc_fallback
+            .or_else(|| env::var("JJ_STARSHIP_JJ_DESC_FALLBACK").ok())
+            .map_or(Cow::Borrowed("anonymous"), Cow::Owned);
+
+        let shortest_id = shortest_id || env::var("JJ_STARSHIP_SHORTEST_ID").is_ok();
+
         let (jj_symbol, git_symbol) = if no_symbol {
             (Cow::Borrowed(""), Cow::Borrowed(""))
         } else {
@@ -172,6 +206,9 @@ impl Config {
             ancestor_bookmark_depth,
             bookmarks_display_limit,
             strip_bookmark_prefix,
+            desc_length,
+            desc_fallback,
+            shortest_id,
             jj_symbol,
             git_symbol,
             jj_display: jj_flags.into_config("JJ_STARSHIP_NO_JJ"),
@@ -188,6 +225,19 @@ impl Config {
             Cow::Borrowed("…")
         } else {
             let truncated: String = s.chars().take(self.truncate_name - 1).collect();
+            Cow::Owned(truncated + "…")
+        }
+    }
+
+    /// Truncate a description to max length, adding ellipsis if needed
+    #[must_use = "returns truncated string, does not modify input"]
+    pub fn truncate_desc<'a>(&self, s: &'a str) -> Cow<'a, str> {
+        if self.desc_length == 0 || s.chars().count() <= self.desc_length {
+            Cow::Borrowed(s)
+        } else if self.desc_length <= 1 {
+            Cow::Borrowed("…")
+        } else {
+            let truncated: String = s.chars().take(self.desc_length - 1).collect();
             Cow::Owned(truncated + "…")
         }
     }

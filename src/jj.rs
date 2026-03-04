@@ -26,6 +26,10 @@ pub struct JjInfo {
     /// Bookmarks with distances: vec of (name, distance). Empty if none found.
     /// Distance 0 = directly on WC, 1+ = ancestor distance
     pub bookmarks: Vec<(String, usize)>,
+    /// First line of WC description (empty if none)
+    pub description: String,
+    /// First line of parent description (None if parent is immutable/trunk)
+    pub parent_description: Option<String>,
     /// Description is empty (needs commit message)
     pub empty_desc: bool,
     /// Commit has no changes (tree matches parent)
@@ -170,6 +174,28 @@ fn find_ancestor_bookmarks(
     Ok(result)
 }
 
+/// Get parent description if parent is not an immutable head (trunk/tag/untracked remote)
+fn parent_description(
+    repo: &Arc<jj_lib::repo::ReadonlyRepo>,
+    commit: &jj_lib::commit::Commit,
+    view: &jj_lib::view::View,
+) -> Option<String> {
+    let immutable_heads = find_immutable_heads(view);
+    let parent_id = commit.parent_ids().first()?;
+    if immutable_heads.contains(parent_id) {
+        return None;
+    }
+    let parent = repo.store().get_commit(parent_id).ok()?;
+    Some(
+        parent
+            .description()
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string(),
+    )
+}
+
 /// Collect JJ repo info from the given path
 #[must_use = "returns collected repo info, does not modify state"]
 pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Result<JjInfo> {
@@ -213,8 +239,14 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         .unwrap_or(id_length)
         .min(change_id.len());
 
-    // Empty description check
-    let empty_desc = commit.description().trim().is_empty();
+    // Description: first line of WC commit
+    let description = commit
+        .description()
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let empty_desc = description.trim().is_empty();
 
     // Empty commit check
     let empty_commit = commit
@@ -243,6 +275,8 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         let ancestors = find_ancestor_bookmarks(&repo, view, wc_id, ancestor_depth)?;
         bookmarks.extend(ancestors);
     }
+
+    let parent_desc = parent_description(&repo, &commit, view);
 
     // Check remote sync status for first (closest) bookmark only
     // For stacked PRs, this reflects whether current stack position needs pushing
@@ -276,6 +310,8 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         change_id,
         change_id_prefix_len,
         bookmarks,
+        description,
+        parent_description: parent_desc,
         empty_desc,
         empty_commit,
         conflict,

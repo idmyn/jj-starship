@@ -50,15 +50,16 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
 
     // change_id with prefix coloring (controlled by show_id)
     if display.show_id {
+        let id = if config.shortest_id {
+            &info.change_id[..info.change_id_prefix_len.min(info.change_id.len())]
+        } else {
+            &info.change_id
+        };
         let use_prefix_color = display.show_color && display.show_prefix_color;
         if use_prefix_color {
-            out.push_str(&format_change_id(
-                &info.change_id,
-                info.change_id_prefix_len,
-                true,
-            ));
+            out.push_str(&format_change_id(id, info.change_id_prefix_len, true));
         } else {
-            out.push_str(&format_segment(&info.change_id, PURPLE, display.show_color));
+            out.push_str(&format_segment(id, PURPLE, display.show_color));
         }
     }
 
@@ -96,6 +97,19 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
         out.push_str(&format_segment(&bookmarks_text, GREEN, display.show_color));
     }
 
+    // Description (or fallback)
+    if display.show_description {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        let desc_text = if info.description.trim().is_empty() {
+            config.desc_fallback.to_string()
+        } else {
+            format!("\"{}\"", config.truncate_desc(&info.description))
+        };
+        out.push_str(&format_segment(&desc_text, GREEN, display.show_color));
+    }
+
     // Status indicators (priority: ! > ⇔ > ∅ > ⇡)
     if display.show_status {
         let mut status = String::with_capacity(8);
@@ -122,6 +136,19 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
             let color = if status == "∅" { YELLOW } else { RED };
             out.push_str(&format_segment(&status_text, color, display.show_color));
         }
+    }
+
+    // Parent description
+    if display.show_parent_description
+        && let Some(parent_desc) = &info.parent_description
+        && !parent_desc.trim().is_empty()
+    {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        let truncated = config.truncate_desc(parent_desc);
+        let parent_text = format!("on \"{truncated}\"");
+        out.push_str(&format_segment(&parent_text, GREEN, display.show_color));
     }
 
     out
@@ -227,6 +254,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0, // unlimited for tests
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -240,6 +270,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -250,7 +282,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -262,6 +294,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![],
+            description: String::new(),
+            parent_description: None,
             empty_desc: true,
             empty_commit: false,
             conflict: true,
@@ -272,7 +306,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {RED}[!∅]{RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}anonymous{RESET} {RED}[!∅]{RESET}"
             )
         );
     }
@@ -283,6 +317,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -293,7 +329,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &default_config()),
             format!(
-                "on {BLUE}{DEFAULT_JJ_SYMBOL}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main){RESET}"
+                "on {BLUE}{DEFAULT_JJ_SYMBOL}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -306,6 +342,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -315,6 +354,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("very-long-bookmark-name".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -325,7 +366,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(very…){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(very…){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -336,6 +377,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 3)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -346,7 +389,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main~3){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main~3){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -357,25 +400,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![],
-            empty_desc: false,
-            empty_commit: false,
-            conflict: false,
-            divergent: false,
-            has_remote: false,
-            is_synced: true,
-        };
-        assert_eq!(
-            format_jj(&info, &no_symbol_config()),
-            format!("on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET}")
-        );
-    }
-
-    #[test]
-    fn test_jj_format_multiple_bookmarks() {
-        let info = JjInfo {
-            change_id: "yzxv1234".into(),
-            change_id_prefix_len: 4,
-            bookmarks: vec![("feature".into(), 1), ("main".into(), 2)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -386,7 +412,30 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(feature~1, main~2){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}\"fix the thing\"{RESET}"
+            )
+        );
+    }
+
+    #[test]
+    fn test_jj_format_multiple_bookmarks() {
+        let info = JjInfo {
+            change_id: "yzxv1234".into(),
+            change_id_prefix_len: 4,
+            bookmarks: vec![("feature".into(), 1), ("main".into(), 2)],
+            description: "fix the thing".into(),
+            parent_description: None,
+            empty_desc: false,
+            empty_commit: false,
+            conflict: false,
+            divergent: false,
+            has_remote: false,
+            is_synced: true,
+        };
+        assert_eq!(
+            format_jj(&info, &no_symbol_config()),
+            format!(
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(feature~1, main~2){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -397,6 +446,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -410,6 +461,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed("󱗆 "),
             git_symbol: Cow::Borrowed(" "),
             jj_display: DisplayConfig {
@@ -419,10 +473,15 @@ mod tests {
                 show_status: true,
                 show_color: false,
                 show_prefix_color: true,
+                show_description: true,
+                show_parent_description: true,
             },
             git_display: DisplayConfig::all_visible(),
         };
-        assert_eq!(format_jj(&info, &config), "on 󱗆 yzxv1234 (main)");
+        assert_eq!(
+            format_jj(&info, &config),
+            "on 󱗆 yzxv1234 (main) \"fix the thing\""
+        );
     }
 
     #[test]
@@ -431,6 +490,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -444,6 +505,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig {
@@ -453,13 +517,15 @@ mod tests {
                 show_status: false,
                 show_color: true,
                 show_prefix_color: true,
+                show_description: true,
+                show_parent_description: true,
             },
             git_display: DisplayConfig::all_visible(),
         };
-        // --no-jj-id hides change_id, shows only bookmarks
+        // --no-jj-id hides change_id, shows only bookmarks + description
         assert_eq!(
             format_jj(&info, &config),
-            format!("on {BLUE}{RESET} {GREEN}(main){RESET}")
+            format!("on {BLUE}{RESET} {GREEN}(main){RESET} {GREEN}\"fix the thing\"{RESET}")
         );
     }
 
@@ -469,6 +535,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -482,6 +550,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig {
@@ -491,13 +562,17 @@ mod tests {
                 show_status: false,
                 show_color: true,
                 show_prefix_color: true,
+                show_description: true,
+                show_parent_description: true,
             },
             git_display: DisplayConfig::all_visible(),
         };
-        // --no-jj-name hides bookmarks, shows only change_id with prefix coloring
+        // --no-jj-name hides bookmarks, shows change_id + description
         assert_eq!(
             format_jj(&info, &config),
-            format!("on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET}")
+            format!(
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}\"fix the thing\"{RESET}"
+            )
         );
     }
 
@@ -508,6 +583,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![],
+            description: String::new(),
+            parent_description: None,
             empty_desc: true,
             empty_commit: true,
             conflict: false,
@@ -517,7 +594,9 @@ mod tests {
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
-            format!("on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET}")
+            format!(
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}anonymous{RESET}"
+            )
         );
     }
 
@@ -528,6 +607,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![],
+            description: String::new(),
+            parent_description: None,
             empty_desc: true,
             empty_commit: false,
             conflict: false,
@@ -538,7 +619,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {YELLOW}[∅]{RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}anonymous{RESET} {YELLOW}[∅]{RESET}"
             )
         );
     }
@@ -551,6 +632,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)], // distance 0 = directly on WC
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -561,7 +644,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -642,6 +725,8 @@ mod tests {
                 ("staging".into(), 3),
                 ("develop".into(), 4),
             ],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -655,6 +740,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 2,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -663,7 +751,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main, feat/foo~1, …+3){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main, feat/foo~1, …+3){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -675,6 +763,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0), ("feat".into(), 1)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -688,6 +778,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 2,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -696,7 +789,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main, feat~1){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main, feat~1){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -713,6 +806,8 @@ mod tests {
                 ("c".into(), 2),
                 ("d".into(), 3),
             ],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -726,6 +821,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -734,7 +832,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(a, b~1, c~2, d~3){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(a, b~1, c~2, d~3){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -745,6 +843,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0), ("feat".into(), 1), ("other".into(), 2)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -758,6 +858,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 1,
             strip_bookmark_prefix: Vec::new(),
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -766,7 +869,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main, …+2){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(main, …+2){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -781,6 +884,8 @@ mod tests {
                 ("dmmulroy/fix-y".into(), 1),
                 ("staging".into(), 2),
             ],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -794,6 +899,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: vec!["dmmulroy/".to_string()],
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -802,7 +910,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(feat-x, fix-y~1, staging~2){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(feat-x, fix-y~1, staging~2){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -817,6 +925,8 @@ mod tests {
                 ("acme-team/fix-y".into(), 1),
                 ("staging".into(), 2),
             ],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -830,6 +940,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: vec!["dmmulroy/".to_string(), "acme-team/".to_string()],
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -838,7 +951,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(feat-x, fix-y~1, staging~2){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(feat-x, fix-y~1, staging~2){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
@@ -850,6 +963,8 @@ mod tests {
             change_id: "yzxv1234".into(),
             change_id_prefix_len: 4,
             bookmarks: vec![("dmmulroy/very-long-feature-name".into(), 0)],
+            description: "fix the thing".into(),
+            parent_description: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -863,6 +978,9 @@ mod tests {
             ancestor_bookmark_depth: 10,
             bookmarks_display_limit: 0,
             strip_bookmark_prefix: vec!["dmmulroy/".to_string()],
+            desc_length: 30,
+            desc_fallback: Cow::Borrowed("anonymous"),
+            shortest_id: false,
             jj_symbol: Cow::Borrowed(""),
             git_symbol: Cow::Borrowed(""),
             jj_display: DisplayConfig::all_visible(),
@@ -872,7 +990,7 @@ mod tests {
         assert_eq!(
             format_jj(&info, &config),
             format!(
-                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(very-long…){RESET}"
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(very-long…){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
     }
