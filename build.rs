@@ -8,15 +8,35 @@ fn run_cmd(cmd: &str, args: &[&str]) -> String {
 }
 
 fn main() {
+    // --ignore-working-copy keeps these build-time reads from snapshotting the
+    // working copy (which would write .git/index and append to the op log).
     let jj_change = run_cmd(
         "jj",
-        &["log", "-r", "@", "-T", "change_id.short(8)", "--no-graph"],
+        &[
+            "--ignore-working-copy",
+            "--no-pager",
+            "log",
+            "-r",
+            "@",
+            "-T",
+            "change_id.short(8)",
+            "--no-graph",
+        ],
     );
     println!("cargo:rustc-env=JJ_CHANGE_ID={jj_change}");
 
     let git_commit = run_cmd(
         "jj",
-        &["log", "-r", "@", "-T", "commit_id.short(8)", "--no-graph"],
+        &[
+            "--ignore-working-copy",
+            "--no-pager",
+            "log",
+            "-r",
+            "@",
+            "-T",
+            "commit_id.short(8)",
+            "--no-graph",
+        ],
     );
     println!("cargo:rustc-env=GIT_COMMIT={git_commit}");
 

@@ -4,11 +4,13 @@ use crate::error::{Error, Result};
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
 use jj_lib::hex_util::encode_reverse_hex;
 use jj_lib::object_id::ObjectId;
+use jj_lib::operation::Operation;
 use jj_lib::ref_name::RefName;
-use jj_lib::repo::{Repo, StoreFactories};
+use jj_lib::repo::{ReadonlyRepo, Repo, StoreFactories};
 use jj_lib::settings::UserSettings;
 use jj_lib::str_util::{StringMatcher, StringPattern};
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
+use pollster::FutureExt as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -42,6 +44,8 @@ pub struct JjInfo {
     pub has_remote: bool,
     /// Whether any bookmark is synced with remote
     pub is_synced: bool,
+    /// Number of heads in the op log (1 = normal, >1 = divergent operations)
+    pub op_head_count: usize,
 }
 
 /// Create minimal `UserSettings` for read-only operations
@@ -196,6 +200,60 @@ fn parent_description(
     )
 }
 
+/// Load the repo at a single op head without ever resolving divergence.
+///
+/// `RepoLoader::load_at_head()` is not a read: when the op log has more than
+/// one head it takes the op-heads lock and then either prunes ancestor heads
+/// via `update_op_heads()`, or opens a transaction and commits a "reconcile
+/// divergent operations" operation - writing to `.jj/repo/op_store`,
+/// `.jj/repo/op_heads`, `.jj/repo/store/extra` and `.git/refs/jj/keep`.
+/// A prompt runs on every keypress and must do none of that, so we read the
+/// heads ourselves and load one directly.
+///
+/// Returns the repo plus the number of op heads found, so the caller can
+/// surface divergence instead of silently papering over it.
+fn load_at_single_head(workspace: &Workspace) -> Result<(Arc<ReadonlyRepo>, usize)> {
+    let loader = workspace.repo_loader();
+
+    let head_ids = loader
+        .op_heads_store()
+        .get_op_heads()
+        .block_on()
+        .map_err(|e| Error::Jj(format!("read op heads: {e}")))?;
+    let head_count = head_ids.len();
+
+    let mut ops: Vec<Operation> = Vec::with_capacity(head_count);
+    for id in &head_ids {
+        ops.push(
+            loader
+                .load_operation(id)
+                .map_err(|e| Error::Jj(format!("load operation: {e}")))?,
+        );
+    }
+
+    // Deterministic pick: latest end timestamp, op id as tiebreak. This is the
+    // same ordering jj-lib applies in `resolve_op_heads()`, so we agree with jj
+    // about which side is newest without writing anything. Note that unlike
+    // `load_at_head()` we do not prune a head that is an ancestor of another -
+    // pruning is a write, and cleaning up the op log is not a prompt's job.
+    ops.sort_by(|a, b| {
+        a.metadata()
+            .time
+            .end
+            .timestamp
+            .cmp(&b.metadata().time.end.timestamp)
+            .then_with(|| a.id().cmp(b.id()))
+    });
+    let op = ops
+        .pop()
+        .ok_or_else(|| Error::Jj("op log has no heads".into()))?;
+
+    let repo = loader
+        .load_at(&op)
+        .map_err(|e| Error::Jj(format!("load repo at operation: {e}")))?;
+    Ok((repo, head_count))
+}
+
 /// Collect JJ repo info from the given path
 #[must_use = "returns collected repo info, does not modify state"]
 pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Result<JjInfo> {
@@ -209,10 +267,7 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
     )
     .map_err(|e| Error::Jj(format!("load workspace: {e}")))?;
 
-    let repo: Arc<jj_lib::repo::ReadonlyRepo> = workspace
-        .repo_loader()
-        .load_at_head()
-        .map_err(|e| Error::Jj(format!("load repo: {e}")))?;
+    let (repo, op_head_count) = load_at_single_head(&workspace)?;
 
     let view = repo.view();
 
@@ -318,5 +373,6 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         divergent,
         has_remote,
         is_synced,
+        op_head_count,
     })
 }

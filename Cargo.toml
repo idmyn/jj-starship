@@ -18,6 +18,9 @@ git = ["dep:git2"]
 [dependencies]
 # JJ integration
 jj-lib = "0.37"
+# Same version jj-lib itself uses; needed to drive its async OpHeadsStore
+# methods from this sync binary.
+pollster = "0.4"
 
 # Git integration
 git2 = { version = "0.19", default-features = false, optional = true }

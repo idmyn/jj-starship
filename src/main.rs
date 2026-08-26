@@ -98,6 +98,9 @@ struct Cli {
     /// Hide parent description
     #[arg(long, global = true)]
     no_jj_parent_desc: bool,
+    /// Hide the op-log divergence indicator
+    #[arg(long, global = true)]
+    no_jj_op_divergence: bool,
 
     #[cfg(feature = "git")]
     #[command(flatten)]
@@ -151,6 +154,7 @@ fn main() -> ExitCode {
         no_prefix_color: cli.no_prefix_color,
         no_description: cli.no_jj_desc,
         no_parent_description: cli.no_jj_parent_desc,
+        no_op_divergence: cli.no_jj_op_divergence,
     };
 
     #[cfg(feature = "git")]
@@ -165,6 +169,7 @@ fn main() -> ExitCode {
             no_prefix_color: false,       // N/A for git
             no_description: false,        // N/A for git
             no_parent_description: false, // N/A for git
+            no_op_divergence: false,      // N/A for git
         },
     );
     #[cfg(not(feature = "git"))]

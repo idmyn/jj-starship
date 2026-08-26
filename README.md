@@ -131,8 +131,20 @@ on {symbol}{branch} ({commit}) [{status}]
 |--------|---------|
 | `!` | Conflict |
 | `?` | Empty description |
-| `⇔` | Divergent |
+| `⇔` | Divergent change (multiple commits share the change ID) |
 | `⇡` | Current or closest bookmark unsynced with remote |
+
+Shown outside `[{status}]`, so it survives `--no-jj-status`:
+
+| Indicator | Meaning |
+|-----------|---------|
+| `[op×N]` | The op log has N heads - divergent operations awaiting reconciliation |
+
+The prompt reports op-log divergence rather than resolving it. `RepoLoader::load_at_head()`
+writes a `reconcile divergent operations` operation when it finds multiple heads, which is
+not something a command that runs on every keypress should do, so jj-starship loads a single
+head directly and leaves the fork in place for a real `jj` command to clean up. As a result
+the prompt shows one side of the fork (the head with the latest timestamp) until then.
 
 ### Git Status Symbols
 
@@ -164,6 +176,7 @@ on {symbol}{branch} ({commit}) [{status}]
 | `--no-jj-name` | Hide bookmark name |
 | `--no-jj-id` | Hide change ID |
 | `--no-jj-status` | Hide JJ status |
+| `--no-jj-op-divergence` | Hide the `[op×N]` op-log divergence indicator |
 | `--no-git-prefix` | Hide "on {symbol}" for Git |
 | `--no-git-name` | Hide branch name |
 | `--no-git-id` | Hide commit hash |
@@ -185,6 +198,7 @@ All options can be set via environment variables (CLI args take precedence):
 - `JJ_STARSHIP_NO_JJ_NAME`
 - `JJ_STARSHIP_NO_JJ_ID`
 - `JJ_STARSHIP_NO_JJ_STATUS`
+- `JJ_STARSHIP_NO_JJ_OP_DIVERGENCE`
 - `JJ_STARSHIP_NO_GIT_PREFIX`
 - `JJ_STARSHIP_NO_GIT_COLOR`
 - `JJ_STARSHIP_NO_GIT_NAME`

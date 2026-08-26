@@ -1629,6 +1629,7 @@ dependencies = [
  "clap",
  "git2",
  "jj-lib",
+ "pollster",
  "thiserror",
 ]
 

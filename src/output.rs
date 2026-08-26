@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::fmt::Write;
 
 use crate::color::{BLUE, BRIGHT_BLACK, BRIGHT_MAGENTA, GREEN, PURPLE, RED, RESET, YELLOW};
-use crate::config::Config;
+use crate::config::{Config, DisplayConfig};
 #[cfg(feature = "git")]
 use crate::git::GitInfo;
 use crate::jj::JjInfo;
@@ -33,6 +33,22 @@ fn format_change_id(change_id: &str, prefix_len: usize, show_prefix_color: bool)
     } else {
         format!("{BRIGHT_MAGENTA}{prefix}{RESET}{BRIGHT_BLACK}{rest}{RESET}")
     }
+}
+
+/// Append the op-log divergence indicator, e.g. `[op*2]`.
+///
+/// Deliberately not gated on `show_status`: a forked op log is a repo-state
+/// warning rather than working-copy status, and the common starship config runs
+/// with `--no-jj-status`. Use `--no-jj-op-divergence` to hide it.
+fn push_op_divergence(out: &mut String, info: &JjInfo, display: &DisplayConfig) {
+    if !display.show_op_divergence || info.op_head_count <= 1 {
+        return;
+    }
+    if !out.is_empty() {
+        out.push(' ');
+    }
+    let text = format!("[op\u{d7}{}]", info.op_head_count);
+    out.push_str(&format_segment(&text, RED, display.show_color));
 }
 
 /// Format JJ info as prompt string
@@ -143,6 +159,8 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
             out.push_str(&format_segment(&status_text, color, display.show_color));
         }
     }
+
+    push_op_divergence(&mut out, info, display);
 
     // Parent description
     if display.show_parent_description
@@ -284,6 +302,7 @@ mod tests {
             divergent: false,
             has_remote: true,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -308,6 +327,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -331,6 +351,7 @@ mod tests {
             divergent: false,
             has_remote: true,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &default_config()),
@@ -368,6 +389,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &config),
@@ -391,6 +413,7 @@ mod tests {
             divergent: false,
             has_remote: true,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -414,6 +437,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -437,6 +461,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -460,6 +485,7 @@ mod tests {
             divergent: false,
             has_remote: true,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -481,6 +507,7 @@ mod tests {
                 show_prefix_color: true,
                 show_description: true,
                 show_parent_description: true,
+                show_op_divergence: true,
             },
             git_display: DisplayConfig::all_visible(),
         };
@@ -504,6 +531,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -525,6 +553,7 @@ mod tests {
                 show_prefix_color: true,
                 show_description: true,
                 show_parent_description: true,
+                show_op_divergence: true,
             },
             git_display: DisplayConfig::all_visible(),
         };
@@ -549,6 +578,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -570,6 +600,7 @@ mod tests {
                 show_prefix_color: true,
                 show_description: true,
                 show_parent_description: true,
+                show_op_divergence: true,
             },
             git_display: DisplayConfig::all_visible(),
         };
@@ -597,6 +628,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -621,6 +653,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -646,6 +679,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         assert_eq!(
             format_jj(&info, &no_symbol_config()),
@@ -739,6 +773,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -777,6 +812,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -820,6 +856,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -857,6 +894,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -898,6 +936,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -939,6 +978,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 0,
@@ -977,6 +1017,7 @@ mod tests {
             divergent: false,
             has_remote: false,
             is_synced: true,
+            op_head_count: 1,
         };
         let config = Config {
             truncate_name: 10,
@@ -999,5 +1040,95 @@ mod tests {
                 "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} {GREEN}(very-long…){RESET} {GREEN}\"fix the thing\"{RESET}"
             )
         );
+    }
+
+    #[test]
+    fn test_jj_format_op_divergence_shown() {
+        let info = JjInfo {
+            change_id: "yzxv1234".into(),
+            change_id_prefix_len: 4,
+            bookmarks: Vec::new(),
+            description: "fix the thing".into(),
+            parent_description: None,
+            empty_desc: false,
+            empty_commit: false,
+            conflict: false,
+            divergent: false,
+            has_remote: false,
+            is_synced: true,
+            op_head_count: 2,
+        };
+        assert_eq!(
+            format_jj(&info, &no_symbol_config()),
+            format!(
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} \
+                 {GREEN}\"fix the thing\"{RESET} {RED}[op\u{d7}2]{RESET}"
+            )
+        );
+    }
+
+    #[test]
+    fn test_jj_format_op_divergence_survives_no_status() {
+        // A forked op log must still be visible with --no-jj-status, which is
+        // the flag set the common starship config uses.
+        let info = JjInfo {
+            change_id: "yzxv1234".into(),
+            change_id_prefix_len: 4,
+            bookmarks: Vec::new(),
+            description: "fix the thing".into(),
+            parent_description: None,
+            empty_desc: false,
+            empty_commit: false,
+            conflict: true,
+            divergent: false,
+            has_remote: false,
+            is_synced: true,
+            op_head_count: 3,
+        };
+        let mut config = no_symbol_config();
+        config.jj_display.show_status = false;
+        let out = format_jj(&info, &config);
+        assert!(out.contains("[op\u{d7}3]"), "{out}");
+        assert!(!out.contains('!'), "{out}");
+    }
+
+    #[test]
+    fn test_jj_format_op_divergence_hidden_when_disabled() {
+        let info = JjInfo {
+            change_id: "yzxv1234".into(),
+            change_id_prefix_len: 4,
+            bookmarks: Vec::new(),
+            description: "fix the thing".into(),
+            parent_description: None,
+            empty_desc: false,
+            empty_commit: false,
+            conflict: false,
+            divergent: false,
+            has_remote: false,
+            is_synced: true,
+            op_head_count: 2,
+        };
+        let mut config = no_symbol_config();
+        config.jj_display.show_op_divergence = false;
+        assert!(!format_jj(&info, &config).contains("[op"));
+    }
+
+    #[test]
+    fn test_jj_format_single_op_head_has_no_indicator() {
+        let info = JjInfo {
+            change_id: "yzxv1234".into(),
+            change_id_prefix_len: 4,
+            bookmarks: Vec::new(),
+            description: "fix the thing".into(),
+            parent_description: None,
+            empty_desc: false,
+            empty_commit: false,
+            conflict: false,
+            divergent: false,
+            has_remote: false,
+            is_synced: true,
+            op_head_count: 1,
+        };
+        assert!(!format_jj(&info, &no_symbol_config()).contains("[op"));
     }
 }

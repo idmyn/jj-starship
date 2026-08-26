@@ -26,6 +26,8 @@ pub struct DisplayConfig {
     pub show_description: bool,
     /// Show parent description
     pub show_parent_description: bool,
+    /// Show the op-log divergence indicator (JJ only)
+    pub show_op_divergence: bool,
 }
 
 impl DisplayConfig {
@@ -39,6 +41,7 @@ impl DisplayConfig {
             show_prefix_color: true,
             show_description: true,
             show_parent_description: true,
+            show_op_divergence: true,
         }
     }
 }
@@ -108,6 +111,7 @@ pub struct DisplayFlags {
     pub no_prefix_color: bool,
     pub no_description: bool,
     pub no_parent_description: bool,
+    pub no_op_divergence: bool,
 }
 
 impl DisplayFlags {
@@ -124,6 +128,8 @@ impl DisplayFlags {
                 && env::var(format!("{env_prefix}_DESC")).is_err(),
             show_parent_description: !self.no_parent_description
                 && env::var(format!("{env_prefix}_PARENT_DESC")).is_err(),
+            show_op_divergence: !self.no_op_divergence
+                && env::var(format!("{env_prefix}_OP_DIVERGENCE")).is_err(),
         }
     }
 }
