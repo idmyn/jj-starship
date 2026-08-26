@@ -9,7 +9,7 @@ use crate::color::{BLUE, BRIGHT_BLACK, BRIGHT_MAGENTA, GREEN, PURPLE, RED, RESET
 use crate::config::{Config, DisplayConfig};
 #[cfg(feature = "git")]
 use crate::git::GitInfo;
-use crate::jj::JjInfo;
+use crate::jj::{JjInfo, ParentInfo};
 
 fn format_segment(text: &str, color: &str, show_color: bool) -> String {
     if show_color {
@@ -32,6 +32,59 @@ fn format_change_id(change_id: &str, prefix_len: usize, show_prefix_color: bool)
         format!("{BRIGHT_MAGENTA}{prefix}{RESET}")
     } else {
         format!("{BRIGHT_MAGENTA}{prefix}{RESET}{BRIGHT_BLACK}{rest}{RESET}")
+    }
+}
+
+/// Render a change ID, honouring `--shortest-id` and prefix colouring.
+fn render_change_id(
+    change_id: &str,
+    prefix_len: usize,
+    config: &Config,
+    display: &DisplayConfig,
+) -> String {
+    let id = if config.shortest_id {
+        &change_id[..prefix_len.min(change_id.len())]
+    } else {
+        change_id
+    };
+    if display.show_color && display.show_prefix_color {
+        format_change_id(id, prefix_len, true)
+    } else {
+        format_segment(id, PURPLE, display.show_color)
+    }
+}
+
+/// Append the parent commit as `on {change_id} "{description}"`.
+///
+/// The change ID sits outside the quotes and is styled like the working-copy
+/// change ID, so `--shortest-id` and prefix colouring apply to both. It is
+/// hidden by `--no-jj-id` alongside the working-copy ID, in which case the
+/// output collapses back to `on "{description}"`.
+fn push_parent(out: &mut String, parent: &ParentInfo, config: &Config, display: &DisplayConfig) {
+    if parent.description.trim().is_empty() {
+        return;
+    }
+    if !out.is_empty() {
+        out.push(' ');
+    }
+    let quoted = format!("\"{}\"", config.truncate_desc(&parent.description));
+    if display.show_id {
+        out.push_str(&format_segment("on", GREEN, display.show_color));
+        out.push(' ');
+        out.push_str(&render_change_id(
+            &parent.change_id,
+            parent.change_id_prefix_len,
+            config,
+            display,
+        ));
+        out.push(' ');
+        out.push_str(&format_segment(&quoted, GREEN, display.show_color));
+    } else {
+        out.push_str(&format_segment(
+            &format!("on {quoted}"),
+            GREEN,
+            display.show_color,
+        ));
     }
 }
 
@@ -66,17 +119,12 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
 
     // change_id with prefix coloring (controlled by show_id)
     if display.show_id {
-        let id = if config.shortest_id {
-            &info.change_id[..info.change_id_prefix_len.min(info.change_id.len())]
-        } else {
-            &info.change_id
-        };
-        let use_prefix_color = display.show_color && display.show_prefix_color;
-        if use_prefix_color {
-            out.push_str(&format_change_id(id, info.change_id_prefix_len, true));
-        } else {
-            out.push_str(&format_segment(id, PURPLE, display.show_color));
-        }
+        out.push_str(&render_change_id(
+            &info.change_id,
+            info.change_id_prefix_len,
+            config,
+            display,
+        ));
     }
 
     // Bookmarks in parentheses (controlled by show_name - they're names/labels)
@@ -162,17 +210,11 @@ pub fn format_jj(info: &JjInfo, config: &Config) -> String {
 
     push_op_divergence(&mut out, info, display);
 
-    // Parent description
+    // Parent commit
     if display.show_parent_description
-        && let Some(parent_desc) = &info.parent_description
-        && !parent_desc.trim().is_empty()
+        && let Some(parent) = &info.parent
     {
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        let truncated = config.truncate_desc(parent_desc);
-        let parent_text = format!("on \"{truncated}\"");
-        out.push_str(&format_segment(&parent_text, GREEN, display.show_color));
+        push_parent(&mut out, parent, config, display);
     }
 
     out
@@ -295,7 +337,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -320,7 +362,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![],
             description: String::new(),
-            parent_description: None,
+            parent: None,
             empty_desc: true,
             empty_commit: false,
             conflict: true,
@@ -344,7 +386,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -382,7 +424,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("very-long-bookmark-name".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -406,7 +448,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 3)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -430,7 +472,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -454,7 +496,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("feature".into(), 1), ("main".into(), 2)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -478,7 +520,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -524,7 +566,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -571,7 +613,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -621,7 +663,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![],
             description: String::new(),
-            parent_description: None,
+            parent: None,
             empty_desc: true,
             empty_commit: true,
             conflict: false,
@@ -646,7 +688,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![],
             description: String::new(),
-            parent_description: None,
+            parent: None,
             empty_desc: true,
             empty_commit: false,
             conflict: false,
@@ -672,7 +714,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0)], // distance 0 = directly on WC
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -766,7 +808,7 @@ mod tests {
                 ("develop".into(), 4),
             ],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -805,7 +847,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0), ("feat".into(), 1)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -849,7 +891,7 @@ mod tests {
                 ("d".into(), 3),
             ],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -887,7 +929,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("main".into(), 0), ("feat".into(), 1), ("other".into(), 2)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -929,7 +971,7 @@ mod tests {
                 ("staging".into(), 2),
             ],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -971,7 +1013,7 @@ mod tests {
                 ("staging".into(), 2),
             ],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -1010,7 +1052,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: vec![("dmmulroy/very-long-feature-name".into(), 0)],
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -1049,7 +1091,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: Vec::new(),
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -1076,7 +1118,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: Vec::new(),
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: true,
@@ -1099,7 +1141,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: Vec::new(),
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -1120,7 +1162,7 @@ mod tests {
             change_id_prefix_len: 4,
             bookmarks: Vec::new(),
             description: "fix the thing".into(),
-            parent_description: None,
+            parent: None,
             empty_desc: false,
             empty_commit: false,
             conflict: false,
@@ -1130,5 +1172,94 @@ mod tests {
             op_head_count: 1,
         };
         assert!(!format_jj(&info, &no_symbol_config()).contains("[op"));
+    }
+
+    fn info_with_parent() -> JjInfo {
+        JjInfo {
+            change_id: "yzxv1234".into(),
+            change_id_prefix_len: 4,
+            bookmarks: Vec::new(),
+            description: "fix the thing".into(),
+            parent: Some(ParentInfo {
+                change_id: "wqrs5678".into(),
+                change_id_prefix_len: 2,
+                description: "the base".into(),
+            }),
+            empty_desc: false,
+            empty_commit: false,
+            conflict: false,
+            divergent: false,
+            has_remote: false,
+            is_synced: true,
+            op_head_count: 1,
+        }
+    }
+
+    #[test]
+    fn test_jj_format_parent_shows_change_id_outside_quotes() {
+        assert_eq!(
+            format_jj(&info_with_parent(), &no_symbol_config()),
+            format!(
+                "on {BLUE}{RESET}{BRIGHT_MAGENTA}yzxv{RESET}{BRIGHT_BLACK}1234{RESET} \
+                 {GREEN}\"fix the thing\"{RESET} {GREEN}on{RESET} \
+                 {BRIGHT_MAGENTA}wq{RESET}{BRIGHT_BLACK}rs5678{RESET} {GREEN}\"the base\"{RESET}"
+            )
+        );
+    }
+
+    #[test]
+    fn test_jj_format_parent_change_id_honours_shortest_id() {
+        let mut config = no_symbol_config();
+        config.shortest_id = true;
+        let out = format_jj(&info_with_parent(), &config);
+        // Parent id truncated to its own unique prefix, not the WC's.
+        assert!(
+            out.ends_with(&format!(
+                "{GREEN}on{RESET} {BRIGHT_MAGENTA}wq{RESET} {GREEN}\"the base\"{RESET}"
+            )),
+            "{out}"
+        );
+        assert!(!out.contains("rs5678"), "{out}");
+    }
+
+    #[test]
+    fn test_jj_format_parent_no_id_collapses_to_quotes_only() {
+        // --no-jj-id hides both change IDs; the parent falls back to the
+        // pre-existing `on "desc"` rendering byte for byte.
+        let mut config = no_symbol_config();
+        config.jj_display.show_id = false;
+        assert_eq!(
+            format_jj(&info_with_parent(), &config),
+            format!(
+                "on {BLUE}{RESET} {GREEN}\"fix the thing\"{RESET} {GREEN}on \"the base\"{RESET}"
+            )
+        );
+    }
+
+    #[test]
+    fn test_jj_format_parent_empty_description_hidden() {
+        let mut info = info_with_parent();
+        info.parent = Some(ParentInfo {
+            change_id: "wqrs5678".into(),
+            change_id_prefix_len: 2,
+            description: "   ".into(),
+        });
+        let out = format_jj(&info, &no_symbol_config());
+        assert!(!out.contains("on wq"), "{out}");
+        assert!(!out.contains("wqrs"), "{out}");
+    }
+
+    #[test]
+    fn test_jj_format_parent_description_truncated() {
+        let mut info = info_with_parent();
+        info.parent = Some(ParentInfo {
+            change_id: "wqrs5678".into(),
+            change_id_prefix_len: 2,
+            description: "a very long parent description indeed".into(),
+        });
+        let mut config = no_symbol_config();
+        config.desc_length = 10;
+        let out = format_jj(&info, &config);
+        assert!(out.contains("\"a very lo\u{2026}\""), "{out}");
     }
 }

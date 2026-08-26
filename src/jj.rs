@@ -30,8 +30,8 @@ pub struct JjInfo {
     pub bookmarks: Vec<(String, usize)>,
     /// First line of WC description (empty if none)
     pub description: String,
-    /// First line of parent description (None if parent is immutable/trunk)
-    pub parent_description: Option<String>,
+    /// Parent commit info (None if the parent is immutable/trunk)
+    pub parent: Option<ParentInfo>,
     /// Description is empty (needs commit message)
     pub empty_desc: bool,
     /// Commit has no changes (tree matches parent)
@@ -46,6 +46,17 @@ pub struct JjInfo {
     pub is_synced: bool,
     /// Number of heads in the op log (1 = normal, >1 = divergent operations)
     pub op_head_count: usize,
+}
+
+/// Parent commit info, collected only when the parent is not an immutable head
+#[derive(Debug)]
+pub struct ParentInfo {
+    /// Short change ID
+    pub change_id: String,
+    /// Shortest unique prefix length for `change_id`
+    pub change_id_prefix_len: usize,
+    /// First line of the parent's description (empty if none)
+    pub description: String,
 }
 
 /// Create minimal `UserSettings` for read-only operations
@@ -178,26 +189,49 @@ fn find_ancestor_bookmarks(
     Ok(result)
 }
 
-/// Get parent description if parent is not an immutable head (trunk/tag/untracked remote)
-fn parent_description(
-    repo: &Arc<jj_lib::repo::ReadonlyRepo>,
+/// Short change ID in JJ's reverse hex format, plus its shortest unique prefix
+/// length (for prefix colouring and `--shortest-id`).
+///
+/// Uses the direct repo API rather than `IdPrefixContext`, which would require
+/// revset evaluation.
+fn short_change_id(
+    repo: &Arc<ReadonlyRepo>,
+    change_id: &jj_lib::backend::ChangeId,
+    id_length: usize,
+) -> (String, usize) {
+    let full = encode_reverse_hex(change_id.as_bytes());
+    let short = full[..id_length.min(full.len())].to_string();
+    let prefix_len = repo
+        .shortest_unique_change_id_prefix_len(change_id)
+        .unwrap_or(id_length)
+        .min(short.len());
+    (short, prefix_len)
+}
+
+/// Get parent info if the parent is not an immutable head (trunk/tag/untracked remote)
+fn parent_info(
+    repo: &Arc<ReadonlyRepo>,
     commit: &jj_lib::commit::Commit,
     view: &jj_lib::view::View,
-) -> Option<String> {
+    id_length: usize,
+) -> Option<ParentInfo> {
     let immutable_heads = find_immutable_heads(view);
     let parent_id = commit.parent_ids().first()?;
     if immutable_heads.contains(parent_id) {
         return None;
     }
     let parent = repo.store().get_commit(parent_id).ok()?;
-    Some(
-        parent
+    let (change_id, change_id_prefix_len) = short_change_id(repo, parent.change_id(), id_length);
+    Some(ParentInfo {
+        change_id,
+        change_id_prefix_len,
+        description: parent
             .description()
             .lines()
             .next()
             .unwrap_or("")
             .to_string(),
-    )
+    })
 }
 
 /// Load the repo at a single op head without ever resolving divergence.
@@ -283,16 +317,7 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         .get_commit(wc_id)
         .map_err(|e| Error::Jj(format!("get commit: {e}")))?;
 
-    // Change ID in JJ's reverse hex format
-    let change_id_full = encode_reverse_hex(commit.change_id().as_bytes());
-    let change_id = change_id_full[..id_length.min(change_id_full.len())].to_string();
-
-    // Compute shortest unique prefix length for change_id coloring
-    // Uses direct repo API (faster than IdPrefixContext which requires revset evaluation)
-    let change_id_prefix_len = repo
-        .shortest_unique_change_id_prefix_len(commit.change_id())
-        .unwrap_or(id_length)
-        .min(change_id.len());
+    let (change_id, change_id_prefix_len) = short_change_id(&repo, commit.change_id(), id_length);
 
     // Description: first line of WC commit
     let description = commit
@@ -331,7 +356,7 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         bookmarks.extend(ancestors);
     }
 
-    let parent_desc = parent_description(&repo, &commit, view);
+    let parent = parent_info(&repo, &commit, view, id_length);
 
     // Check remote sync status for first (closest) bookmark only
     // For stacked PRs, this reflects whether current stack position needs pushing
@@ -366,7 +391,7 @@ pub fn collect(repo_root: &Path, id_length: usize, ancestor_depth: usize) -> Res
         change_id_prefix_len,
         bookmarks,
         description,
-        parent_description: parent_desc,
+        parent,
         empty_desc,
         empty_commit,
         conflict,
